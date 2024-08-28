@@ -201,7 +201,7 @@ export const handle: Handle = async ({ event, resolve }) => {
 		}
 	}
 
-	event.locals.sessionId = sessionId;
+	event.locals.sessionId = 'alandao-force-session';
 
 	// CSRF protection
 	const requestContentType = event.request.headers.get("content-type")?.split(";")[0] ?? "";
