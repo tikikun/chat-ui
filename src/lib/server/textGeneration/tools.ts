@@ -32,9 +32,14 @@ export async function getTools(
 	if (assistant) {
 		if (assistant?.tools?.length) {
 			preferences = assistant.tools;
-		} else if (assistantHasWebSearch(assistant)) {
-			return [directlyAnswer, websearch];
+
+			if (assistantHasWebSearch(assistant)) {
+				preferences.push(websearch._id.toString());
+			}
 		} else {
+			if (assistantHasWebSearch(assistant)) {
+				return [websearch, directlyAnswer];
+			}
 			return [directlyAnswer];
 		}
 	}
@@ -191,6 +196,7 @@ export async function* runTools(
 				type: input.type === "file" ? "str" : input.type,
 			})),
 		})),
+		conversationId: conv._id,
 	})) {
 		// model natively supports tool calls
 		if (output.token.toolCalls) {
