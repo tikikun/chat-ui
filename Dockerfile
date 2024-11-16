@@ -5,6 +5,7 @@ ARG INCLUDE_DB=false
 
 FROM node:20 AS builder
 
+RUN git clone -b main https://github.com/tikikun/chat-ui.git /app
 WORKDIR /app
 
 COPY --link --chown=1000 package-lock.json package.json ./
@@ -17,7 +18,7 @@ RUN --mount=type=cache,target=/app/.npm \
         npm set cache /app/.npm && \
         npm ci
 
-COPY --link --chown=1000 . .
+# COPY --link --chown=1000 . .
 
 RUN git config --global --add safe.directory /app && \
     PUBLIC_COMMIT_SHA=$(git rev-parse HEAD) && \
