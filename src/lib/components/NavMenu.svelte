@@ -11,7 +11,7 @@
 	import type { Model } from "$lib/types/Model";
 	import { page } from "$app/stores";
 
-	export let conversations: Promise<ConvSidebar[]>;
+	export let conversations: ConvSidebar[];
 	export let canLogin: boolean;
 	export let user: LayoutData["user"];
 
@@ -25,16 +25,16 @@
 		new Date().setMonth(new Date().getMonth() - 1),
 	];
 
-	$: groupedConversations = conversations.then((convs) => ({
-		today: convs.filter(({ updatedAt }) => updatedAt.getTime() > dateRanges[0]),
-		week: convs.filter(
+	$: groupedConversations = {
+		today: conversations.filter(({ updatedAt }) => updatedAt.getTime() > dateRanges[0]),
+		week: conversations.filter(
 			({ updatedAt }) => updatedAt.getTime() > dateRanges[1] && updatedAt.getTime() < dateRanges[0]
 		),
-		month: convs.filter(
+		month: conversations.filter(
 			({ updatedAt }) => updatedAt.getTime() > dateRanges[2] && updatedAt.getTime() < dateRanges[1]
 		),
-		older: convs.filter(({ updatedAt }) => updatedAt.getTime() < dateRanges[2]),
-	}));
+		older: conversations.filter(({ updatedAt }) => updatedAt.getTime() < dateRanges[2]),
+	};
 
 	const titles: { [key: string]: string } = {
 		today: "Today",
@@ -46,7 +46,7 @@
 	const nModels: number = $page.data.models.filter((el: Model) => !el.unlisted).length;
 </script>
 
-<div class="sticky top-0 flex flex-none items-center justify-between px-3 py-3.5 max-sm:pt-0">
+<div class="sticky top-0 flex flex-none items-center justify-between px-1.5 py-3.5 max-sm:pt-0">
 	<a
 		class="flex items-center rounded-xl text-lg font-semibold"
 		href="{envPublic.PUBLIC_ORIGIN}{base}/"

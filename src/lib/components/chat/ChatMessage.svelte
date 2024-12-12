@@ -1,12 +1,9 @@
 <script lang="ts">
-	import { marked, type MarkedOptions } from "marked";
-	import markedKatex from "marked-katex-extension";
 	import type { Message } from "$lib/types/Message";
 	import { afterUpdate, createEventDispatcher, tick } from "svelte";
 	import { deepestChild } from "$lib/utils/deepestChild";
 	import { page } from "$app/stores";
 
-	import CodeBlock from "../CodeBlock.svelte";
 	import CopyToClipBoardBtn from "../CopyToClipBoardBtn.svelte";
 	import IconLoading from "../icons/IconLoading.svelte";
 	import CarbonRotate360 from "~icons/carbon/rotate-360";
@@ -17,7 +14,6 @@
 	import CarbonPen from "~icons/carbon/pen";
 	import CarbonChevronLeft from "~icons/carbon/chevron-left";
 	import CarbonChevronRight from "~icons/carbon/chevron-right";
-	import { PUBLIC_SEP_TOKEN } from "$lib/constants/publicSepToken";
 	import type { Model } from "$lib/types/Model";
 	import UploadedFile from "./UploadedFile.svelte";
 
@@ -29,61 +25,17 @@
 		type MessageWebSearchSourcesUpdate,
 		type MessageWebSearchUpdate,
 		type MessageFinalAnswerUpdate,
+		type MessageReasoningUpdate,
+		MessageReasoningUpdateType,
 	} from "$lib/types/MessageUpdate";
 	import { base } from "$app/paths";
 	import { useConvTreeStore } from "$lib/stores/convTree";
 	import ToolUpdate from "./ToolUpdate.svelte";
 	import { useSettingsStore } from "$lib/stores/settings";
-	import DOMPurify from "isomorphic-dompurify";
 	import { enhance } from "$app/forms";
 	import { browser } from "$app/environment";
-	import type { WebSearchSource } from "$lib/types/WebSearch";
-
-	function addInlineCitations(md: string, webSearchSources: WebSearchSource[] = []): string {
-		const linkStyle =
-			"color: rgb(59, 130, 246); text-decoration: none; hover:text-decoration: underline;";
-
-		return md.replace(/\[(\d+)\]/g, (match: string) => {
-			const indices: number[] = (match.match(/\d+/g) || []).map(Number);
-			const links: string = indices
-				.map((index: number) => {
-					if (index === 0) return false;
-					const source = webSearchSources[index - 1];
-					if (source) {
-						return `<a href="${source.link}" target="_blank" rel="noreferrer" style="${linkStyle}">${index}</a>`;
-					}
-					return "";
-				})
-				.filter(Boolean)
-				.join(", ");
-
-			return links ? ` <sup>${links}</sup>` : match;
-		});
-	}
-
-	function sanitizeMd(md: string) {
-		let ret = md
-			.replace(/<\|[a-z]*$/, "")
-			.replace(/<\|[a-z]+\|$/, "")
-			.replace(/<$/, "")
-			.replaceAll(PUBLIC_SEP_TOKEN, " ")
-			.replaceAll(/<\|[a-z]+\|>/g, " ")
-			.replaceAll(/<br\s?\/?>/gi, "\n")
-			.replaceAll("<", "&lt;")
-			.trim();
-
-		for (const stop of [...(model.parameters?.stop ?? []), "<|endoftext|>"]) {
-			if (ret.endsWith(stop)) {
-				ret = ret.slice(0, -stop.length).trim();
-			}
-		}
-
-		return ret;
-	}
-
-	function unsanitizeMd(md: string) {
-		return md.replaceAll("&lt;", "<");
-	}
+	import MarkdownRenderer from "./MarkdownRenderer.svelte";
+	import OpenReasoningResults from "./OpenReasoningResults.svelte";
 
 	export let model: Model;
 	export let id: Message["id"];
@@ -108,36 +60,6 @@
 	let isCopied = false;
 
 	let initialized = false;
-	const renderer = new marked.Renderer();
-	// For code blocks with simple backticks
-	renderer.codespan = (code) => {
-		// Unsanitize double-sanitized code
-		return `<code>${code.replaceAll("&amp;", "&")}</code>`;
-	};
-
-	renderer.link = (href, title, text) => {
-		return `<a href="${href?.replace(/>$/, "")}" target="_blank" rel="noreferrer">${text}</a>`;
-	};
-
-	// eslint-disable-next-line @typescript-eslint/no-unused-vars
-	const { extensions, ...defaults } = marked.getDefaults() as MarkedOptions & {
-		// eslint-disable-next-line @typescript-eslint/no-explicit-any
-		extensions: any;
-	};
-	const options: MarkedOptions = {
-		...defaults,
-		gfm: true,
-		breaks: true,
-		renderer,
-	};
-
-	marked.use(
-		markedKatex({
-			throwOnError: false,
-		})
-	);
-
-	$: tokens = marked.lexer(addInlineCitations(sanitizeMd(message.content), webSearchSources));
 
 	$: emptyLoad =
 		!message.content && (webSearchIsDone || (searchUpdates && searchUpdates.length === 0));
@@ -171,8 +93,12 @@
 		}
 	}
 
-	$: searchUpdates = (message.updates?.filter(({ type }) => type === "webSearch") ??
+	$: searchUpdates = (message.updates?.filter(({ type }) => type === MessageUpdateType.WebSearch) ??
 		[]) as MessageWebSearchUpdate[];
+
+	$: reasoningUpdates = (message.updates?.filter(
+		({ type }) => type === MessageUpdateType.Reasoning
+	) ?? []) as MessageReasoningUpdate[];
 
 	$: messageFinalAnswer = message.updates?.find(
 		({ type }) => type === MessageUpdateType.FinalAnswer
@@ -259,7 +185,8 @@
 {#if message.from === "assistant"}
 	<div
 		class="group relative -mb-4 flex items-start justify-start gap-4 pb-4 leading-relaxed"
-		id="message-assistant-{message.id}"
+		data-message-id={message.id}
+		data-message-role="assistant"
 		role="presentation"
 		on:click={() => (isTapped = !isTapped)}
 		on:keydown={() => (isTapped = !isTapped)}
@@ -288,9 +215,17 @@
 				</div>
 			{/if}
 			{#if searchUpdates && searchUpdates.length > 0}
-				<OpenWebSearchResults
-					classNames={tokens.length ? "mb-3.5" : ""}
-					webSearchMessages={searchUpdates}
+				<OpenWebSearchResults webSearchMessages={searchUpdates} />
+			{/if}
+			{#if reasoningUpdates && reasoningUpdates.length > 0}
+				{@const summaries = reasoningUpdates
+					.filter((u) => u.subtype === MessageReasoningUpdateType.Status)
+					.map((u) => u.status)}
+
+				<OpenReasoningResults
+					summary={summaries[summaries.length - 1] || ""}
+					content={message.reasoning || ""}
+					loading={loading && message.content.length === 0}
 				/>
 			{/if}
 
@@ -305,22 +240,18 @@
 			{/if}
 
 			<div
-				class="prose max-w-none dark:prose-invert max-sm:prose-sm prose-headings:font-semibold prose-h1:text-lg prose-h2:text-base prose-h3:text-base prose-pre:bg-gray-800 dark:prose-pre:bg-gray-900"
 				bind:this={contentEl}
+				class:mt-2={reasoningUpdates.length > 0 || searchUpdates.length > 0}
 			>
 				{#if isLast && loading && $settings.disableStream}
 					<IconLoading classNames="loading inline ml-2 first:ml-0" />
 				{/if}
-				{#each tokens as token}
-					{#if token.type === "code"}
-						<CodeBlock lang={token.lang} code={unsanitizeMd(token.text)} />
-					{:else}
-						{#await marked.parse(token.raw, options) then parsed}
-							<!-- eslint-disable-next-line svelte/no-at-html-tags -->
-							{@html DOMPurify.sanitize(parsed)}
-						{/await}
-					{/if}
-				{/each}
+
+				<div
+					class="prose max-w-none dark:prose-invert max-sm:prose-sm prose-headings:font-semibold prose-h1:text-lg prose-h2:text-base prose-h3:text-base prose-pre:bg-gray-800 dark:prose-pre:bg-gray-900"
+				>
+					<MarkdownRenderer content={message.content} sources={webSearchSources} />
+				</div>
 			</div>
 
 			<!-- Web Search sources -->
@@ -426,7 +357,8 @@
 {#if message.from === "user"}
 	<div
 		class="group relative w-full items-start justify-start gap-4 max-sm:text-sm"
-		id="message-user-{message.id}"
+		data-message-id={message.id}
+		data-message-type="user"
 		role="presentation"
 		on:click={() => (isTapped = !isTapped)}
 		on:keydown={() => (isTapped = !isTapped)}
@@ -545,7 +477,7 @@
 			<svelte:fragment slot="childrenNav">
 				{#if nChildren > 1 && $convTreeStore.editing === null}
 					<div
-						class="font-white group/navbranch z-10 -mt-1 ml-3.5 mr-auto flex h-6 w-fit select-none flex-row items-center justify-center gap-1 text-sm"
+						class="font-white group/navbranch z-0 -mt-1 ml-3.5 mr-auto flex h-6 w-fit select-none flex-row items-center justify-center gap-1 text-sm"
 					>
 						<button
 							class="inline text-lg font-thin text-gray-400 hover:text-gray-800 disabled:pointer-events-none disabled:opacity-25 dark:text-gray-500 dark:hover:text-gray-200"
