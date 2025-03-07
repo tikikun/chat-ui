@@ -1,119 +1,67 @@
 <script lang="ts">
 	import type { WebSearchSource } from "$lib/types/WebSearch";
-	import katex from "katex";
-	import DOMPurify from "isomorphic-dompurify";
-	import { Marked } from "marked";
+	import { processTokens, processTokensSync, type Token } from "$lib/utils/marked";
+	import MarkdownWorker from "$lib/workers/markdownWorker?worker";
 	import CodeBlock from "../CodeBlock.svelte";
+	import type { IncomingMessage, OutgoingMessage } from "$lib/workers/markdownWorker";
+	import { browser } from "$app/environment";
 
-	export let content: string;
-	export let sources: WebSearchSource[] = [];
+	import DOMPurify from "isomorphic-dompurify";
 
-	function addInlineCitations(md: string, webSearchSources: WebSearchSource[] = []): string {
-		const linkStyle =
-			"color: rgb(59, 130, 246); text-decoration: none; hover:text-decoration: underline;";
-
-		return md.replace(/\[(\d+)\]/g, (match: string) => {
-			const indices: number[] = (match.match(/\d+/g) || []).map(Number);
-			const links: string = indices
-				.map((index: number) => {
-					if (index === 0) return false;
-					const source = webSearchSources[index - 1];
-					if (source) {
-						return `<a href="${source.link}" target="_blank" rel="noreferrer" style="${linkStyle}">${index}</a>`;
-					}
-					return "";
-				})
-				.filter(Boolean)
-				.join(", ");
-
-			return links ? ` <sup>${links}</sup>` : match;
-		});
+	interface Props {
+		content: string;
+		sources?: WebSearchSource[];
 	}
 
-	function escapeHTML(content: string) {
-		return content.replace(
-			/[<>&\n]/g,
-			(x) =>
-				({
-					"<": "&lt;",
-					">": "&gt;",
-					"&": "&amp;",
-				}[x] || x)
-		);
-	}
+	const worker = browser && window.Worker ? new MarkdownWorker() : null;
 
-	function processLatex(parsed: string) {
-		const delimiters = [
-			{ left: "$$", right: "$$", display: true },
-			{ left: "$", right: "$", display: false },
-			{ left: "( ", right: " )", display: false },
-			{ left: "[ ", right: " ]", display: true },
-		];
+	let { content, sources = [] }: Props = $props();
 
-		for (const { left, right, display } of delimiters) {
-			// Escape special regex characters in the delimiters
-			const escapedLeft = left.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-			const escapedRight = right.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+	let tokens: Token[] = $state(processTokensSync(content, sources));
 
-			// Create regex pattern that matches content between delimiters
-			const pattern = new RegExp(`(?<!\\w)${escapedLeft}([^]*?)${escapedRight}(?!\\w)`, "g");
-
-			parsed = parsed.replace(pattern, (match, latex) => {
-				try {
-					// Remove the delimiters from the latex content
-					const cleanLatex = latex.trim();
-					const rendered = katex.renderToString(cleanLatex, { displayMode: display });
-
-					// For display mode, wrap in centered paragraph
-					if (display) {
-						return `<p style="width:100%;text-align:center;">${rendered}</p>`;
+	async function processContent(content: string, sources: WebSearchSource[]): Promise<Token[]> {
+		if (worker) {
+			return new Promise((resolve) => {
+				worker.onmessage = (event: MessageEvent<OutgoingMessage>) => {
+					if (event.data.type !== "processed") {
+						throw new Error("Invalid message type");
 					}
-					return rendered;
-				} catch (error) {
-					console.error("KaTeX error:", error);
-					return match; // Return original on error
-				}
+					resolve(event.data.tokens);
+				};
+				worker.postMessage(
+					JSON.parse(JSON.stringify({ content, sources, type: "process" })) as IncomingMessage
+				);
 			});
+		} else {
+			return processTokens(content, sources);
 		}
-		return parsed;
 	}
 
-	const marked = new Marked({
-		hooks: {
-			preprocess: (md) => addInlineCitations(escapeHTML(md), sources),
-			postprocess: (html) => {
-				return DOMPurify.sanitize(processLatex(html));
-			},
-		},
-		renderer: {
-			codespan: (code) => `<code>${code.replaceAll("&amp;", "&")}</code>`,
-			link: (href, title, text) =>
-				`<a href="${href?.replace(/>$/, "")}" target="_blank" rel="noreferrer">${text}</a>`,
-		},
-		gfm: true,
+	$effect(() => {
+		if (!browser) {
+			tokens = processTokensSync(content, sources);
+		} else {
+			(async () => {
+				tokens = await processContent(content, sources);
+			})();
+		}
 	});
 
 	DOMPurify.addHook("afterSanitizeAttributes", (node) => {
 		if (node.tagName === "A") {
-			node.setAttribute("rel", "noreferrer");
 			node.setAttribute("target", "_blank");
+			node.setAttribute("rel", "noreferrer");
 		}
 	});
 </script>
 
-{#each marked.lexer(content) as token}
-	{#if token.type === "code"}
-		<CodeBlock lang={token.lang} code={token.text} />
-	{:else}
-		{#await marked.parse(token.raw) then parsed}
+{#each tokens as token}
+	{#if token.type === "text"}
+		{#await token.html then html}
 			<!-- eslint-disable-next-line svelte/no-at-html-tags -->
-			{@html parsed}
+			{@html DOMPurify.sanitize(html)}
 		{/await}
+	{:else if token.type === "code"}
+		<CodeBlock code={token.code} rawCode={token.rawCode} />
 	{/if}
 {/each}
-
-<style lang="postcss">
-	:global(.katex-display) {
-		overflow: auto hidden;
-	}
-</style>

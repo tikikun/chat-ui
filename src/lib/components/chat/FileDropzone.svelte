@@ -1,12 +1,27 @@
 <script lang="ts">
+	import { createBubbler } from "svelte/legacy";
+
+	const bubble = createBubbler();
+	import { useSettingsStore } from "$lib/stores/settings";
+	import { documentParserToolId } from "$lib/utils/toolIds";
 	import CarbonImage from "~icons/carbon/image";
-	// import EosIconsLoading from "~icons/eos-icons/loading";
 
-	export let files: File[];
-	export let mimeTypes: string[] = [];
+	interface Props {
+		// import EosIconsLoading from "~icons/eos-icons/loading";
+		files: File[];
+		mimeTypes?: string[];
+		onDrag?: boolean;
+		onDragInner?: boolean;
+	}
 
-	export let onDrag = false;
-	export let onDragInner = false;
+	let {
+		files = $bindable(),
+		mimeTypes = [],
+		onDrag = $bindable(false),
+		onDragInner = $bindable(false),
+	}: Props = $props();
+
+	const settings = useSettingsStore();
 
 	async function dropHandle(event: DragEvent) {
 		event.preventDefault();
@@ -32,7 +47,11 @@
 								);
 							})
 						) {
-							setErrorMsg(`Some file type not supported. Only allowed: ${mimeTypes.join(", ")}`);
+							setErrorMsg(
+								`Some file type not supported. Only allowed: ${mimeTypes.join(
+									", "
+								)}. Uploaded document is of type ${file.type}`
+							);
 							files = [];
 							return;
 						}
@@ -46,6 +65,10 @@
 
 						// add the file to the files array
 						files = [...files, file];
+
+						settings.instantSet({
+							tools: [...($settings.tools ?? []), documentParserToolId],
+						});
 					}
 				}
 				onDrag = false;
@@ -62,10 +85,13 @@
 <div
 	id="dropzone"
 	role="form"
-	on:drop={dropHandle}
-	on:dragenter={() => (onDragInner = true)}
-	on:dragleave={() => (onDragInner = false)}
-	on:dragover|preventDefault
+	ondrop={dropHandle}
+	ondragenter={() => (onDragInner = true)}
+	ondragleave={() => (onDragInner = false)}
+	ondragover={(e) => {
+		e.preventDefault();
+		bubble("dragover");
+	}}
 	class="relative flex h-28 w-full max-w-4xl flex-col items-center justify-center gap-1 rounded-xl border-2 border-dotted {onDragInner
 		? 'border-blue-200 !bg-blue-500/10 text-blue-600 *:pointer-events-none dark:border-blue-600 dark:bg-blue-500/20 dark:text-blue-500'
 		: 'bg-gray-100 text-gray-500 dark:border-gray-500 dark:bg-gray-700 dark:text-gray-400'}"

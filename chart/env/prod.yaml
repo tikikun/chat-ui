@@ -3,22 +3,18 @@ image:
   name: chat-ui
 
 nodeSelector:
-  role-hub-utils: "true"
+  role-huggingchat: "true"
 
 tolerations:
-  - key: CriticalAddonsOnly
-    operator: Equal
+  - key: "huggingface.co/huggingchat"
+    operator: "Equal"
+    value: "true"
+    effect: "NoSchedule"
 
 serviceAccount:
   enabled: true
   create: true
   name: huggingchat-prod
-
-networkPolicy:
-  enabled: true
-  allowedBlocks:
-    - 10.0.252.0/25
-    - 10.240.0.0/24
 
 ingress:
   path: "/chat"
@@ -42,41 +38,11 @@ envVars:
   COOKIE_SECURE: "true"
   ENABLE_ASSISTANTS: "true"
   ENABLE_ASSISTANTS_RAG: "true"
-  EXPOSE_API: "true"
   METRICS_PORT: 5565
   LOG_LEVEL: "debug"
   METRICS_ENABLED: "true"
   MODELS: >
     [
-      {
-        "name": "Qwen/Qwen2.5-72B-Instruct",
-        "description": "The latest Qwen open model with improved role-playing, long text generation and structured data understanding.",
-        "modelUrl": "https://huggingface.co/Qwen/Qwen2.5-72B-Instruct",
-        "websiteUrl": "https://qwenlm.github.io/blog/qwen2.5/",
-        "logoUrl": "https://huggingface.co/datasets/huggingchat/models-logo/resolve/main/qwen-logo.png",
-        "preprompt": "You are Qwen, created by Alibaba Cloud. You are a helpful assistant.",
-        "parameters": {
-          "stop": ["<|endoftext|>", "<|im_end|>"],
-          "temperature": 0.6,
-          "truncate": 28672,
-          "max_new_tokens": 3072
-        },
-        "tools": true,
-        "promptExamples": [
-          {
-            "title": "Write an email from bullet list",
-            "prompt": "As a restaurant owner, write a professional email to the supplier to get these products every week: \n\n- Wine (x10)\n- Eggs (x24)\n- Bread (x12)"
-          },
-          {
-            "title": "Code a snake game",
-            "prompt": "Code a basic snake game in python, give explanations for each step."
-          },
-          {
-            "title": "Assist in a task",
-            "prompt": "How do I make a delicious lemon cheesecake?"
-          }
-        ]
-      },
       {
         "name": "meta-llama/Llama-3.3-70B-Instruct",
         "id": "meta-llama/Llama-3.3-70B-Instruct",
@@ -108,6 +74,35 @@ envVars:
         ]
       },
       {
+        "name": "Qwen/Qwen2.5-72B-Instruct",
+        "description": "The latest Qwen open model with improved role-playing, long text generation and structured data understanding.",
+        "modelUrl": "https://huggingface.co/Qwen/Qwen2.5-72B-Instruct",
+        "websiteUrl": "https://qwenlm.github.io/blog/qwen2.5/",
+        "logoUrl": "https://huggingface.co/datasets/huggingchat/models-logo/resolve/main/qwen-logo.png",
+        "preprompt": "You are Qwen, created by Alibaba Cloud. You are a helpful assistant.",
+        "parameters": {
+          "stop": ["<|endoftext|>", "<|im_end|>"],
+          "temperature": 0.6,
+          "truncate": 28672,
+          "max_new_tokens": 3072
+        },
+        "tools": true,
+        "promptExamples": [
+          {
+            "title": "Write an email from bullet list",
+            "prompt": "As a restaurant owner, write a professional email to the supplier to get these products every week: \n\n- Wine (x10)\n- Eggs (x24)\n- Bread (x12)"
+          },
+          {
+            "title": "Code a snake game",
+            "prompt": "Code a basic snake game in python, give explanations for each step."
+          },
+          {
+            "title": "Assist in a task",
+            "prompt": "How do I make a delicious lemon cheesecake?"
+          }
+        ]
+      },
+      {
         "name": "CohereForAI/c4ai-command-r-plus-08-2024",
         "description": "Cohere's largest language model, optimized for conversational interaction and tool use. Now with the 2024 update!",
         "modelUrl": "https://huggingface.co/CohereForAI/c4ai-command-r-plus-08-2024",
@@ -115,7 +110,7 @@ envVars:
         "logoUrl": "https://huggingface.co/datasets/huggingchat/models-logo/resolve/main/cohere-logo.png",
         "tools": true,
         "parameters": {
-          "stop": ["<|END_OF_TURN_TOKEN|>"],
+          "stop": ["<|END_OF_TURN_TOKEN|>", "<|im_end|>"],
           "truncate": 28672,
           "max_new_tokens": 2048,
           "temperature": 0.3
@@ -136,23 +131,15 @@ envVars:
         ]
       },
       {
-        "name": "Qwen/QwQ-32B-Preview",
-        "preprompt": "You are a helpful and harmless assistant. You are Qwen developed by Alibaba. You should think step-by-step.",
-        "modelUrl": "https://huggingface.co/Qwen/QwQ-32B-Preview",
-        "websiteUrl": "https://qwenlm.github.io/blog/qwq-32b-preview/",
-        "logoUrl": "https://huggingface.co/datasets/huggingchat/models-logo/resolve/main/qwen-logo.png",
-        "description": "QwQ is an experiment model from the Qwen Team with advanced reasoning capabilities.",
+        "name": "deepseek-ai/DeepSeek-R1-Distill-Qwen-32B",
+        "modelUrl": "https://huggingface.co/deepseek-ai/DeepSeek-R1-Distill-Qwen-32B",
+        "websiteUrl": "https://deepseek.com/",
+        "logoUrl": "https://huggingface.co/datasets/huggingchat/models-logo/resolve/main/deepseek-logo.png",
+        "description": "The first reasoning model from DeepSeek, distilled into a 32B dense model. Outperforms o1-mini on multiple benchmarks.",
         "reasoning": {
-          "type": "summarize"
-        },
-        "parameters": {
-          "stop": ["<|im_end|>"],
-          "truncate": 12288,
-          "max_new_tokens": 4096,
-          "temperature": 0.7,
-          "top_k": 20,
-          "top_p": 0.8,
-          "repetition_penalty": 1.05
+          "type": "tokens",
+          "beginToken": "",
+          "endToken": "</think>"
         },
         "promptExamples": [
           {
@@ -166,6 +153,12 @@ envVars:
           {
             "title": "Measuring 6 liters",
             "prompt": "I have a 6- and a 12-liter jug. I want to measure exactly 6 liters."
+          }
+        ],
+        "endpoints": [
+          {
+            "type": "openai",
+            "baseURL": "https://internal.api-inference.huggingface.co/models/deepseek-ai/DeepSeek-R1-Distill-Qwen-32B/v1"
           }
         ]
       },
@@ -196,10 +189,45 @@ envVars:
             "prompt": "I have a 6- and a 12-liter jug. I want to measure exactly 6 liters."
           }
         ],
-        "endpoints": [{
-          "type": "openai",
-          "baseURL": "https://api-inference.huggingface.co/models/nvidia/Llama-3.1-Nemotron-70B-Instruct-HF/v1"
-        }]
+        "endpoints": [
+          {
+            "type": "openai",
+            "baseURL": "https://internal.api-inference.huggingface.co/models/nvidia/Llama-3.1-Nemotron-70B-Instruct-HF/v1"
+          }
+        ]
+      },
+      {
+        "name": "Qwen/QwQ-32B",
+        "preprompt": "You are a helpful and harmless assistant. You are Qwen developed by Alibaba. You should think step-by-step.",
+        "modelUrl": "https://huggingface.co/Qwen/QwQ-32B",
+        "websiteUrl": "https://qwenlm.github.io/blog/qwq-32b/",
+        "logoUrl": "https://huggingface.co/datasets/huggingchat/models-logo/resolve/main/qwen-logo.png",
+        "description": "QwQ is the latest reasoning model released by the Qwen team, approaching the capabilities of R1 in benchmarks.",
+        "reasoning": {
+          "type": "tokens",
+          "beginToken": "",
+          "endToken": "</think>"
+        },
+        "promptExamples": [
+          {
+            "title": "Rs in strawberry",
+            "prompt": "how many R in strawberry?"
+          },
+          {
+            "title": "Larger number",
+            "prompt": "9.11 or 9.9 which number is larger?"
+          },
+          {
+            "title": "Measuring 6 liters",
+            "prompt": "I have a 6- and a 12-liter jug. I want to measure exactly 6 liters."
+          }
+        ],
+        "endpoints": [
+          {
+            "type": "openai",
+            "baseURL": "https://internal.api-inference.huggingface.co/models/Qwen/QwQ-32B/v1"
+          }
+        ]
       },
       {
         "name": "Qwen/Qwen2.5-Coder-32B-Instruct",
@@ -228,10 +256,12 @@ envVars:
             "prompt": "Generate a snazzy static landing page for a local coffee shop using HTML and CSS. You can use tailwind using <script src='https://cdn.tailwindcss.com'></script>."
           }
         ],
-        "endpoints": [{
-          "type": "openai",
-          "baseURL": "https://api-inference.huggingface.co/models/Qwen/Qwen2.5-Coder-32B-Instruct/v1"
-        }]
+        "endpoints": [
+          {
+            "type": "openai",
+            "baseURL": "https://internal.api-inference.huggingface.co/models/Qwen/Qwen2.5-Coder-32B-Instruct/v1"
+          }
+        ]
       },
       {
         "name": "meta-llama/Llama-3.2-11B-Vision-Instruct",
@@ -245,19 +275,21 @@ envVars:
           "truncate": 14336,
           "max_new_tokens": 1536
         },
-        "endpoints": [{
-          "type": "openai",
-          "baseURL": "https://api-inference.huggingface.co/models/meta-llama/Llama-3.2-11B-Vision-Instruct/v1",
-          "multimodal": {
-            "image": {
-              "maxSizeInMB": 10,
-              "maxWidth": 560,
-              "maxHeight": 560,
-              "supportedMimeTypes": ["image/png", "image/jpeg", "image/webp"],
-              "preferredMimeType": "image/webp"
+        "endpoints": [
+          {
+            "type": "openai",
+            "baseURL": "https://internal.api-inference.huggingface.co/models/meta-llama/Llama-3.2-11B-Vision-Instruct/v1",
+            "multimodal": {
+              "image": {
+                "maxSizeInMB": 10,
+                "maxWidth": 560,
+                "maxHeight": 560,
+                "supportedMimeTypes": ["image/png", "image/jpeg", "image/webp"],
+                "preferredMimeType": "image/webp"
+              }
             }
           }
-        }]
+        ]
       },
       {
         "name": "NousResearch/Hermes-3-Llama-3.1-8B",
@@ -347,7 +379,7 @@ envVars:
         ]
       },
       {
-        "name": "llhf/Meta-Llama-3.1-8B-Instruct",
+        "name": "meta-llama/Llama-3.1-8B-Instruct",
         "parameters": {
           "temperature": 0.6,
           "stop": ["<|endoftext|>", "<|eot_id|>"]
@@ -400,6 +432,10 @@ envVars:
       {
         "name": "meta-llama/Meta-Llama-3.1-70B-Instruct",
         "transferTo": "meta-llama/Llama-3.3-70B-Instruct"
+      },
+      {
+        "name": "Qwen/QwQ-32B-Preview",
+        "transferTo": "Qwen/QwQ-32B"
       }
     ]
   PUBLIC_ORIGIN: "https://huggingface.co"
@@ -407,9 +443,9 @@ envVars:
   PUBLIC_ANNOUNCEMENT_BANNERS: >
     [
       {
-        "title": "Llama 3.3 70B is now available!",
+        "title": "DeepSeek R1 is now available!",
         "linkTitle": "Try it out!",
-        "linkHref": "https://huggingface.co/chat/models/meta-llama/Llama-3.3-70B-Instruct"
+        "linkHref": "https://huggingface.co/chat/models/deepseek-ai/DeepSeek-R1-Distill-Qwen-32B"
       }
     ]
   PUBLIC_APP_NAME: "HuggingChat"
@@ -417,12 +453,12 @@ envVars:
   PUBLIC_APP_COLOR: "yellow"
   PUBLIC_APP_DESCRIPTION: "Making the community's best AI chat models available to everyone."
   PUBLIC_APP_DISCLAIMER_MESSAGE: "Disclaimer: AI is an area of active research with known problems such as biased generation and misinformation. Do not use this application for high-stakes decisions or advice."
-  PUBLIC_APP_GUEST_MESSAGE: "You have reached the guest message limit, Sign In with a free Hugging Face account to continue using HuggingChat."
+  PUBLIC_APP_GUEST_MESSAGE: "Sign in with a free Hugging Face account to continue using HuggingChat."
   PUBLIC_APP_DATA_SHARING: 0
   PUBLIC_APP_DISCLAIMER: 1
   PUBLIC_PLAUSIBLE_SCRIPT_URL: "/js/script.js"
   REQUIRE_FEATURED_ASSISTANTS: "true"
-  TASK_MODEL: "llhf/Meta-Llama-3.1-8B-Instruct"
+  TASK_MODEL: "meta-llama/Llama-3.1-8B-Instruct"
   TEXT_EMBEDDING_MODELS: >
     [{
       "name": "bge-base-en-v1-5-sxa",
@@ -511,7 +547,8 @@ envVars:
         ],
         "outputComponent": "textbox",
         "outputComponentIdx": 0,
-        "showOutput": false
+        "showOutput": false,
+        "isHidden": true
       },
       {
         "_id": "000000000000000000000003",
@@ -562,7 +599,7 @@ envVars:
     ]
   HF_ORG_ADMIN: '644171cfbd0c97265298aa99'
   HF_ORG_EARLY_ACCESS: '5e67bd5b1009063689407478'
-
+  HF_API_ROOT: 'https://internal.api-inference.huggingface.co/models'
 infisical:
   enabled: true
   env: "prod-us-east-1"

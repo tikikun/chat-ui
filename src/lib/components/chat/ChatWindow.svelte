@@ -1,10 +1,11 @@
 <script lang="ts">
+	import { run, createBubbler } from "svelte/legacy";
+
+	const bubble = createBubbler();
 	import type { Message, MessageFile } from "$lib/types/Message";
 	import { createEventDispatcher, onDestroy, tick } from "svelte";
 
-	import CarbonSendAltFilled from "~icons/carbon/send-alt-filled";
 	import CarbonExport from "~icons/carbon/export";
-	import CarbonStopFilledAlt from "~icons/carbon/stop-filled-alt";
 	import CarbonCheckmark from "~icons/carbon/checkmark";
 	import CarbonCaretDown from "~icons/carbon/caret-down";
 
@@ -13,13 +14,9 @@
 	import ChatInput from "./ChatInput.svelte";
 	import StopGeneratingBtn from "../StopGeneratingBtn.svelte";
 	import type { Model } from "$lib/types/Model";
-	import WebSearchToggle from "../WebSearchToggle.svelte";
-	import ToolsMenu from "../ToolsMenu.svelte";
-	import LoginModal from "../LoginModal.svelte";
-	import { page } from "$app/stores";
+	import { page } from "$app/state";
 	import FileDropzone from "./FileDropzone.svelte";
 	import RetryBtn from "../RetryBtn.svelte";
-	import UploadBtn from "../UploadBtn.svelte";
 	import file2base64 from "$lib/utils/file2base64";
 	import type { Assistant } from "$lib/types/Assistant";
 	import { base } from "$app/paths";
@@ -32,34 +29,52 @@
 	import { snapScrollToBottom } from "$lib/actions/snapScrollToBottom";
 	import SystemPromptModal from "../SystemPromptModal.svelte";
 	import ChatIntroduction from "./ChatIntroduction.svelte";
-	import { useConvTreeStore } from "$lib/stores/convTree";
 	import UploadedFile from "./UploadedFile.svelte";
 	import { useSettingsStore } from "$lib/stores/settings";
-	import type { ToolFront } from "$lib/types/Tool";
 	import ModelSwitch from "./ModelSwitch.svelte";
 
 	import { fly } from "svelte/transition";
 	import { cubicInOut } from "svelte/easing";
+	import type { ToolFront } from "$lib/types/Tool";
+	import { loginModalOpen } from "$lib/stores/loginModal";
 
-	export let messages: Message[] = [];
-	export let loading = false;
-	export let pending = false;
+	interface Props {
+		messages?: Message[];
+		messagesAlternatives?: Message["id"][][];
+		loading?: boolean;
+		pending?: boolean;
+		shared?: boolean;
+		currentModel: Model;
+		models: Model[];
+		assistant?: Assistant | undefined;
+		preprompt?: string | undefined;
+		files?: File[];
+	}
 
-	export let shared = false;
-	export let currentModel: Model;
-	export let models: Model[];
-	export let assistant: Assistant | undefined = undefined;
-	export let preprompt: string | undefined = undefined;
-	export let files: File[] = [];
+	let {
+		messages = [],
+		messagesAlternatives = [],
+		loading = false,
+		pending = false,
+		shared = false,
+		currentModel,
+		models,
+		assistant = undefined,
+		preprompt = undefined,
+		files = $bindable([]),
+	}: Props = $props();
 
-	$: isReadOnly = !models.some((model) => model.id === currentModel.id);
+	let isReadOnly = $derived(!models.some((model) => model.id === currentModel.id));
 
-	let loginModalOpen = false;
-	let message: string;
+	let message: string = $state("");
 	let timeout: ReturnType<typeof setTimeout>;
-	let isSharedRecently = false;
-	$: pastedLongContent = false;
-	$: $page.params.id && (isSharedRecently = false);
+	let isSharedRecently = $state(false);
+	let editMsdgId: Message["id"] | null = $state(null);
+	let pastedLongContent = $state(false);
+
+	run(() => {
+		page.params.id && (isSharedRecently = false);
+	});
 
 	const dispatch = createEventDispatcher<{
 		message: string;
@@ -77,7 +92,7 @@
 
 	let lastTarget: EventTarget | null = null;
 
-	let onDrag = false;
+	let onDrag = $state(false);
 
 	const onDragEnter = (e: DragEvent) => {
 		lastTarget = e.target;
@@ -127,66 +142,23 @@
 		}
 	};
 
-	const convTreeStore = useConvTreeStore();
-
-	const updateCurrentIndex = () => {
-		const url = new URL($page.url);
-		let leafId = url.searchParams.get("leafId");
-
-		// Ensure the function is only run in the browser.
-		if (!browser) return;
-
-		if (leafId) {
-			// Remove the 'leafId' from the URL to clean up after retrieving it.
-			url.searchParams.delete("leafId");
-			history.replaceState(null, "", url.toString());
-		} else {
-			// Retrieve the 'leafId' from localStorage if it's not in the URL.
-			leafId = localStorage.getItem("leafId");
-		}
-
-		// If a 'leafId' exists, find the corresponding message and update indices.
-		if (leafId) {
-			let leafMessage = messages.find((m) => m.id == leafId);
-			if (!leafMessage?.ancestors) return; // Exit if the message has no ancestors.
-
-			let ancestors = leafMessage.ancestors;
-
-			// Loop through all ancestors to update the current child index.
-			for (let i = 0; i < ancestors.length; i++) {
-				let curMessage = messages.find((m) => m.id == ancestors[i]);
-				if (curMessage?.children) {
-					for (let j = 0; j < curMessage.children.length; j++) {
-						// Check if the current message's child matches the next ancestor
-						// or the leaf itself, and update the currentChildIndex accordingly.
-						if (i + 1 < ancestors.length) {
-							if (curMessage.children[j] == ancestors[i + 1]) {
-								curMessage.currentChildIndex = j;
-								break;
-							}
-						} else {
-							if (curMessage.children[j] == leafId) {
-								curMessage.currentChildIndex = j;
-								break;
-							}
-						}
-					}
-				}
-			}
-		}
-	};
-
-	updateCurrentIndex();
-
-	$: lastMessage = browser && (messages.find((m) => m.id == $convTreeStore.leaf) as Message);
-	$: lastIsError =
+	let lastMessage = $derived(browser && (messages.at(-1) as Message));
+	let lastIsError = $derived(
 		lastMessage &&
-		!loading &&
-		(lastMessage.from === "user" ||
-			lastMessage.updates?.findIndex((u) => u.type === "status" && u.status === "error") !== -1);
+			!loading &&
+			(lastMessage.from === "user" ||
+				lastMessage.updates?.findIndex((u) => u.type === "status" && u.status === "error") !== -1)
+	);
 
-	$: sources = files?.map<Promise<MessageFile>>((file) =>
-		file2base64(file).then((value) => ({ type: "base64", value, mime: file.type, name: file.name }))
+	let sources = $derived(
+		files?.map<Promise<MessageFile>>((file) =>
+			file2base64(file).then((value) => ({
+				type: "base64",
+				value,
+				mime: file.type,
+				name: file.name,
+			}))
+		)
 	);
 
 	function onShare() {
@@ -210,50 +182,65 @@
 		}
 	});
 
-	let chatContainer: HTMLElement;
+	let chatContainer: HTMLElement | undefined = $state();
 
 	async function scrollToBottom() {
 		await tick();
+		if (!chatContainer) return;
 		chatContainer.scrollTop = chatContainer.scrollHeight;
 	}
 
 	// If last message is from user, scroll to bottom
-	$: if (lastMessage && lastMessage.from === "user") {
-		scrollToBottom();
-	}
+	run(() => {
+		if (lastMessage && lastMessage.from === "user") {
+			scrollToBottom();
+		}
+	});
 
 	const settings = useSettingsStore();
 
-	// active tools are all the checked tools, either from settings or on by default
-	$: activeTools = $page.data.tools.filter((tool: ToolFront) => {
-		if ($page.data?.assistant) {
-			return $page.data.assistant.tools?.includes(tool._id);
-		}
-		return $settings?.tools?.includes(tool._id) ?? tool.isOnByDefault;
-	});
-	$: activeMimeTypes = [
-		...(currentModel.tools ? activeTools.flatMap((tool: ToolFront) => tool.mimeTypes ?? []) : []),
-		...(currentModel.multimodal ? currentModel.multimodalAcceptedMimetypes ?? ["image/*"] : []),
-	];
+	let mimeTypesFromActiveTools = $derived(
+		page.data.tools
+			.filter((tool: ToolFront) => {
+				if (assistant) {
+					return assistant.tools?.includes(tool._id);
+				}
+				if (currentModel.tools) {
+					return $settings?.tools?.includes(tool._id) ?? tool.isOnByDefault;
+				}
+				return false;
+			})
+			.flatMap((tool: ToolFront) => tool.mimeTypes ?? [])
+	);
 
-	$: isFileUploadEnabled = activeMimeTypes.length > 0;
+	let activeMimeTypes = $derived(
+		Array.from(
+			new Set([
+				...mimeTypesFromActiveTools, // fetch mime types from active tools either from tool settings or active assistant
+				...(currentModel.tools && !assistant ? ["application/pdf"] : []), // if its a tool model, we can always enable document parser so we always accept pdfs
+				...(currentModel.multimodal
+					? (currentModel.multimodalAcceptedMimetypes ?? ["image/*"])
+					: []), // if its a multimodal model, we always accept images
+			])
+		)
+	);
+	let isFileUploadEnabled = $derived(activeMimeTypes.length > 0);
 </script>
 
 <svelte:window
-	on:dragenter={onDragEnter}
-	on:dragleave={onDragLeave}
-	on:dragover|preventDefault
-	on:drop|preventDefault={() => (onDrag = false)}
+	ondragenter={onDragEnter}
+	ondragleave={onDragLeave}
+	ondragover={(e) => {
+		e.preventDefault();
+		bubble("dragover");
+	}}
+	ondrop={(e) => {
+		e.preventDefault();
+		onDrag = false;
+	}}
 />
 
 <div class="relative min-h-0 min-w-0">
-	{#if loginModalOpen}
-		<LoginModal
-			on:close={() => {
-				loginModalOpen = false;
-			}}
-		/>
-	{/if}
 	<div
 		class="scrollbar-custom h-full overflow-y-auto"
 		use:snapScrollToBottom={messages.length ? [...messages] : false}
@@ -262,15 +249,14 @@
 		<div
 			class="mx-auto flex h-full max-w-3xl flex-col gap-6 px-5 pt-6 sm:gap-8 xl:max-w-4xl xl:pt-10"
 		>
-			{#if $page.data?.assistant && !!messages.length}
+			{#if assistant && !!messages.length}
 				<a
 					class="mx-auto flex items-center gap-1.5 rounded-full border border-gray-100 bg-gray-50 py-1 pl-1 pr-3 text-sm text-gray-800 hover:bg-gray-100 dark:border-gray-800 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
-					href="{base}/settings/assistants/{$page.data.assistant._id}"
+					href="{base}/settings/assistants/{assistant._id}"
 				>
-					{#if $page.data?.assistant.avatar}
+					{#if assistant.avatar}
 						<img
-							src="{base}/settings/assistants/{$page.data?.assistant._id.toString()}/avatar.jpg?hash=${$page
-								.data.assistant.avatar}"
+							src="{base}/settings/assistants/{assistant._id.toString()}/avatar.jpg?hash=${assistant.avatar}"
 							alt="Avatar"
 							class="size-5 rounded-full object-cover"
 						/>
@@ -278,11 +264,11 @@
 						<div
 							class="flex size-6 items-center justify-center rounded-full bg-gray-300 font-bold uppercase text-gray-500"
 						>
-							{$page.data?.assistant.name[0]}
+							{assistant.name[0]}
 						</div>
 					{/if}
 
-					{$page.data.assistant.name}
+					{assistant.name}
 				</a>
 			{:else if preprompt && preprompt != currentModel.preprompt}
 				<SystemPromptModal preprompt={preprompt ?? ""} />
@@ -290,17 +276,21 @@
 
 			{#if messages.length > 0}
 				<div class="flex h-max flex-col gap-8 pb-52">
-					<ChatMessage
-						{loading}
-						{messages}
-						id={messages[0].id}
-						isAuthor={!shared}
-						readOnly={isReadOnly}
-						model={currentModel}
-						on:retry
-						on:vote
-						on:continue
-					/>
+					{#each messages as message, idx (message.id)}
+						<ChatMessage
+							{loading}
+							{message}
+							alternatives={messagesAlternatives.find((a) => a.includes(message.id)) ?? []}
+							isAuthor={!shared}
+							readOnly={isReadOnly}
+							isLast={idx === messages.length - 1}
+							bind:editMsdgId
+							on:retry
+							on:vote
+							on:continue
+							on:showAlternateMsg
+						/>
+					{/each}
 					{#if isReadOnly}
 						<ModelSwitch {models} {currentModel} />
 					{/if}
@@ -308,26 +298,22 @@
 			{:else if pending}
 				<ChatMessage
 					loading={true}
-					messages={[
-						{
-							id: "0-0-0-0-0",
-							content: "",
-							from: "assistant",
-							children: [],
-						},
-					]}
-					id={"0-0-0-0-0"}
+					message={{
+						id: "0-0-0-0-0",
+						content: "",
+						from: "assistant",
+						children: [],
+					}}
 					isAuthor={!shared}
 					readOnly={isReadOnly}
-					model={currentModel}
 				/>
 			{:else if !assistant}
 				<ChatIntroduction
 					{currentModel}
 					on:message={(ev) => {
-						if ($page.data.loginRequired) {
+						if (page.data.loginRequired) {
 							ev.preventDefault();
-							loginModalOpen = true;
+							$loginModalOpen = true;
 						} else {
 							dispatch("message", ev.detail);
 						}
@@ -338,9 +324,9 @@
 					{models}
 					{assistant}
 					on:message={(ev) => {
-						if ($page.data.loginRequired) {
+						if (page.data.loginRequired) {
 							ev.preventDefault();
-							loginModalOpen = true;
+							$loginModalOpen = true;
 						} else {
 							dispatch("message", ev.detail);
 						}
@@ -381,20 +367,13 @@
 		{/if}
 
 		<div class="w-full">
-			<div class="flex w-full pb-3">
-				{#if !assistant}
-					{#if currentModel.tools}
-						<ToolsMenu {loading} />
-					{:else if $page.data.settings?.searchEnabled}
-						<WebSearchToggle />
-					{/if}
-				{/if}
+			<div class="flex w-full *:mb-3">
 				{#if loading}
-					<StopGeneratingBtn classNames="ml-auto" on:click={() => dispatch("stop")} />
+					<StopGeneratingBtn classNames="ml-auto" onClick={() => dispatch("stop")} />
 				{:else if lastIsError}
 					<RetryBtn
 						classNames="ml-auto"
-						on:click={() => {
+						onClick={() => {
 							if (lastMessage && lastMessage.ancestors) {
 								dispatch("retry", {
 									id: lastMessage.id,
@@ -402,30 +381,28 @@
 							}
 						}}
 					/>
-				{:else}
+				{:else if messages && lastMessage && lastMessage.interrupted && !isReadOnly}
 					<div class="ml-auto gap-2">
-						{#if isFileUploadEnabled}
-							<UploadBtn bind:files mimeTypes={activeMimeTypes} classNames="ml-auto" />
-						{/if}
-						{#if messages && lastMessage && lastMessage.interrupted && !isReadOnly}
-							<ContinueBtn
-								on:click={() => {
-									if (lastMessage && lastMessage.ancestors) {
-										dispatch("continue", {
-											id: lastMessage?.id,
-										});
-									}
-								}}
-							/>
-						{/if}
+						<ContinueBtn
+							onClick={() => {
+								if (lastMessage && lastMessage.ancestors) {
+									dispatch("continue", {
+										id: lastMessage?.id,
+									});
+								}
+							}}
+						/>
 					</div>
 				{/if}
 			</div>
 			<form
 				tabindex="-1"
 				aria-label={isFileUploadEnabled ? "file dropzone" : undefined}
-				on:submit|preventDefault={handleSubmit}
-				class="relative flex w-full max-w-4xl flex-1 items-center rounded-xl border bg-gray-100 focus-within:border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:focus-within:border-gray-500
+				onsubmit={(e) => {
+					e.preventDefault();
+					handleSubmit();
+				}}
+				class="relative flex w-full max-w-4xl flex-1 items-center rounded-xl border bg-gray-100 dark:border-gray-600 dark:bg-gray-700
             {isReadOnly ? 'opacity-30' : ''}"
 			>
 				{#if onDrag && isFileUploadEnabled}
@@ -439,42 +416,49 @@
 							<ChatInput value="Sorry, something went wrong. Please try again." disabled={true} />
 						{:else}
 							<ChatInput
+								{assistant}
 								placeholder={isReadOnly ? "This conversation is read-only." : "Ask anything"}
+								{loading}
 								bind:value={message}
+								bind:files
+								mimeTypes={activeMimeTypes}
 								on:submit={handleSubmit}
-								on:beforeinput={(ev) => {
-									if ($page.data.loginRequired) {
-										ev.preventDefault();
-										loginModalOpen = true;
-									}
-								}}
-								on:paste={onPaste}
-								maxRows={6}
+								{onPaste}
 								disabled={isReadOnly || lastIsError}
+								modelHasTools={currentModel.tools}
+								modelIsMultimodal={currentModel.multimodal}
 							/>
 						{/if}
 
 						{#if loading}
 							<button
-								class="btn mx-1 my-1 inline-block h-[2.4rem] self-end rounded-lg bg-transparent p-1 px-[0.7rem] text-gray-400 enabled:hover:text-gray-700 disabled:opacity-60 enabled:dark:hover:text-gray-100 dark:disabled:opacity-40 md:hidden"
-								on:click={() => dispatch("stop")}
-							>
-								<CarbonStopFilledAlt />
-							</button>
-							<div
-								class="mx-1 my-1 hidden h-[2.4rem] items-center p-1 px-[0.7rem] text-gray-400 enabled:hover:text-gray-700 disabled:opacity-60 enabled:dark:hover:text-gray-100 dark:disabled:opacity-40 md:flex"
+								disabled
+								class="btn absolute bottom-1 right-0.5 size-10 self-end rounded-lg bg-transparent text-gray-400"
 							>
 								<EosIconsLoading />
-							</div>
+							</button>
 						{:else}
 							<button
-								class="btn mx-1 my-1 h-[2.4rem] self-end rounded-lg bg-transparent p-1 px-[0.7rem] text-gray-400 enabled:hover:text-gray-700 disabled:opacity-60 enabled:dark:hover:text-gray-100 dark:disabled:opacity-40"
+								class="btn absolute bottom-2 right-2 size-7 self-end rounded-full border bg-white text-black shadow transition-none enabled:hover:bg-white enabled:hover:shadow-inner disabled:opacity-60 dark:border-gray-600 dark:bg-gray-900 dark:text-white dark:hover:enabled:bg-black"
 								disabled={!message || isReadOnly}
 								type="submit"
 								aria-label="Send message"
 								name="submit"
 							>
-								<CarbonSendAltFilled />
+								<svg
+									width="1em"
+									height="1em"
+									viewBox="0 0 32 32"
+									fill="none"
+									xmlns="http://www.w3.org/2000/svg"
+								>
+									<path
+										fill-rule="evenodd"
+										clip-rule="evenodd"
+										d="M17.0606 4.23197C16.4748 3.64618 15.525 3.64618 14.9393 4.23197L5.68412 13.4871C5.09833 14.0729 5.09833 15.0226 5.68412 15.6084C6.2699 16.1942 7.21965 16.1942 7.80544 15.6084L14.4999 8.91395V26.7074C14.4999 27.5359 15.1715 28.2074 15.9999 28.2074C16.8283 28.2074 17.4999 27.5359 17.4999 26.7074V8.91395L24.1944 15.6084C24.7802 16.1942 25.7299 16.1942 26.3157 15.6084C26.9015 15.0226 26.9015 14.0729 26.3157 13.4871L17.0606 4.23197Z"
+										fill="currentColor"
+									/>
+								</svg>
 							</button>
 						{/if}
 					</div>
@@ -519,7 +503,7 @@
 						class="flex flex-none items-center hover:text-gray-400 max-sm:rounded-lg max-sm:bg-gray-50 max-sm:px-2.5 dark:max-sm:bg-gray-800"
 						type="button"
 						class:hover:underline={!isSharedRecently}
-						on:click={onShare}
+						onclick={onShare}
 						disabled={isSharedRecently}
 					>
 						{#if isSharedRecently}

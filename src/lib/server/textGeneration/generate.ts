@@ -1,4 +1,4 @@
-import type { ToolResult } from "$lib/types/Tool";
+import type { ToolResult, Tool } from "$lib/types/Tool";
 import {
 	MessageReasoningUpdateType,
 	MessageUpdateType,
@@ -16,7 +16,8 @@ type GenerateContext = Omit<TextGenerationContext, "messages"> & { messages: End
 export async function* generate(
 	{ model, endpoint, conv, messages, assistant, isContinue, promptedAt }: GenerateContext,
 	toolResults: ToolResult[],
-	preprompt?: string
+	preprompt?: string,
+	tools?: Tool[]
 ): AsyncIterable<MessageUpdate> {
 	// reasoning mode is false by default
 	let reasoning = false;
@@ -26,7 +27,10 @@ export async function* generate(
 	const startTime = new Date();
 	if (
 		model.reasoning &&
-		(model.reasoning.type === "regex" || model.reasoning.type === "summarize")
+		// if the beginToken is an empty string, the model starts in reasoning mode
+		(model.reasoning.type === "regex" ||
+			model.reasoning.type === "summarize" ||
+			(model.reasoning.type === "tokens" && model.reasoning.beginToken === ""))
 	) {
 		// if the model has reasoning in regex or summarize mode, it starts in reasoning mode
 		// and we extract the answer from the reasoning
@@ -43,6 +47,7 @@ export async function* generate(
 		preprompt,
 		continueMessage: isContinue,
 		generateSettings: assistant?.generateSettings,
+		tools,
 		toolResults,
 		isMultimodal: model.multimodal,
 		conversationId: conv._id,
@@ -99,6 +104,21 @@ Do not use prefixes such as Response: or Answer: when answering to the user.`,
 					finalAnswer = text;
 					logger.error(e);
 				}
+			} else if (model.reasoning && model.reasoning.type === "tokens") {
+				// make sure to remove the content of the reasoning buffer from
+				// the final answer to avoid duplication
+
+				// if the beginToken is an empty string, we don't need to remove anything
+				const beginIndex = model.reasoning.beginToken
+					? reasoningBuffer.indexOf(model.reasoning.beginToken)
+					: 0;
+				const endIndex = reasoningBuffer.lastIndexOf(model.reasoning.endToken);
+
+				if (beginIndex !== -1 && endIndex !== -1) {
+					// Remove the reasoning section (including tokens) from final answer
+					finalAnswer =
+						text.slice(0, beginIndex) + text.slice(endIndex + model.reasoning.endToken.length);
+				}
 			}
 
 			yield {
@@ -119,6 +139,7 @@ Do not use prefixes such as Response: or Answer: when answering to the user.`,
 					subtype: MessageReasoningUpdateType.Status,
 					status: "Started thinking...",
 				};
+				continue;
 			} else if (output.token.text === model.reasoning.endToken) {
 				reasoning = false;
 				reasoningBuffer += output.token.text;
@@ -127,6 +148,7 @@ Do not use prefixes such as Response: or Answer: when answering to the user.`,
 					subtype: MessageReasoningUpdateType.Status,
 					status: `Done in ${Math.round((new Date().getTime() - startTime.getTime()) / 1000)}s.`,
 				};
+				continue;
 			}
 		}
 		// ignore special tokens
